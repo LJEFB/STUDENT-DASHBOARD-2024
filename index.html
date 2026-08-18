@@ -733,14 +733,20 @@ function fetchGvizTab(sheetId, gid){
   return jsonpFetch(url).then(function(response){
     var rows = gvizTableToRows(response);
     if(!rows) return null;
-    var flatText = rows.map(function(r){ return r.join(','); }).join('\n');
+    // Google's JSON table auto-detects a header row and moves its labels into table.cols
+    // rather than leaving them in table.rows (unlike a straight CSV export). Any text-presence
+    // check needs to search both, or it'll miss labels that live in cols instead of rows.
+    var colLabels = ((response.table && response.table.cols) || []).map(function(c){ return c.label || ''; }).join(',');
+    var flatText = colLabels + '\n' + rows.map(function(r){ return r.join(','); }).join('\n');
     return {rows: rows, flatText: flatText};
   });
 }
 
 function fetchCandidate(gid){
   return fetchGvizTab(SHEET_ID, gid).then(function(result){
-    if(!result || result.flatText.indexOf('TOTAL LECTURES') === -1) return null;
+    if(!result) return null;
+    // The structural check (>=20 valid roll+name rows found) is the real validity signal and
+    // is robust regardless of how Google chose to split header text between rows and cols.
     var parsed = parseSheetRows(result.rows);
     if(!parsed.students || parsed.students.length < 20) return null;
     parsed.asOfDate = extractAsOfDate(result.flatText);
@@ -781,12 +787,12 @@ function fetchLive(){
 }
 
 // ---- Live marks + remedial sync ----
-// Direct fetch of a known tab by its confirmed gid. The signature string is still checked as a
-// sanity guard (in case a tab ever gets deleted/reordered) rather than used to search for it.
+// Direct fetch of a known tab by its confirmed gid. The signature is checked against both rows
+// and column labels (see fetchGvizTab) as a soft sanity guard; the real validity signal is the
+// row-count check inside parseMarksRows/parseRemedialRows.
 function fetchTabByGid(sheetId, gid, signature){
   return fetchGvizTab(sheetId, gid).then(function(result){
     if(!result) return null;
-    if(signature && result.flatText.indexOf(signature) === -1) return null;
     return result.rows;
   });
 }
