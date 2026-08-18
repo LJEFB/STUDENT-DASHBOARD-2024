@@ -235,28 +235,28 @@ var REMEDIAL_SHEET_ID = "1oJ1uZ4LaqERjT5na2s1e8Ws6P9l-LFkWMTYU7DLPTXo";
 // marksheet: [midTermCol, projectCol, universityCol]. Roll is col 1 (B), Name col varies.
 var MARKS_COLUMN_MAP = {
   1: {
-    rollCol:1, nameCol:4, signature:"Developing Entrepreneurial Mindset",
+    gid:293689652, rollCol:1, nameCol:4, signature:"Developing Entrepreneurial Mindset",
     subjects: {
       DEM:[6,8,10], FOE:[12,13,15], FEF:[17,18,20], EIC:[22,23,25], BDBP:[27,28,30],
       LIB:[32,33,35], IT:[37,38,40], PSQR:[43,44,46], SRSA:[49,50,52]
     }
   },
   2: {
-    rollCol:1, nameCol:3, signature:"People Management and Organizational Behav",
+    gid:1183470687, rollCol:1, nameCol:3, signature:"People Management and Organizational Behav",
     subjects: {
       PMOB:[5,6,9], EBC:[11,12,15], DTE:[17,18,21], AEE:[23,25,28], MMO:[30,31,33],
       IGO:[35,36,37], LECH:[38,39,40], SAI:[42,43,44]
     }
   },
   3: {
-    rollCol:1, nameCol:4, signature:"Start-up Eco System",
+    gid:776823733, rollCol:1, nameCol:4, signature:"Start-up Eco System",
     subjects: {
       SUEI:[7,8,10], BMM:[13,15,16], UFB:[19,20,22], AIFS:[25,26,28],
       ETML:[31,32,34], BR:[37,38,40], ESBP:[43,44,46]
     }
   },
   4: {
-    rollCol:1, nameCol:4, signature:"Financial Management",
+    gid:850093306, rollCol:1, nameCol:4, signature:"Financial Management",
     subjects: {
       FM:[6,8,9], SOF:[12,14,15], BPO:[18,20,21], LAB:[24,26,27],
       PIB:[30,32,33], SD:[36,38,39], BFS:[42,44,45]
@@ -270,16 +270,18 @@ var MARKS_COLUMN_MAP = {
 // semester because not every subject needed remedial in every sitting.
 var REMEDIAL_COLUMN_MAP = {
   1: {
-    signature:"Winter 2025 Sem 1",
+    gid:769845885, signature:"Winter 2025 Sem 1",
     midOrder: ['DEM','FOE','FEF','EIC','BDBP','LIB','IT','PSQR','SRSA'], midStart:4,
     univOrder: ['DEM','FOE','FEF','EIC','BDBP','LIB','IT','PSQR','SRSA'], univStart:14
   },
   2: {
-    signature:"Summer 2026 Sem 2",
+    gid:1932989032, signature:"Summer 2026 Sem 2",
     midOrder: ['PMOB','EBC','DTE','AEE','MMO','SAI'], midStart:4,
     univOrder: ['PMOB','EBC','DTE','AEE','MMO','LECH','SAI'], univStart:11
   }
 };
+
+var ATTENDANCE_COMPILED_GID = 2002533303;
 
 var SUBJECTS = [
   {k:'branddev', name:"Brand Development &amp; Public Relations"},
@@ -607,8 +609,7 @@ function num(v){ var n = parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return 
 // 0 Roll, 1 Enrollment, 2 Name, 3 Division, 4 BrandDev, 5 %, 6 Case, 7 %, 8 Costing, 9 %,
 // 10 DoingBiz, 11 %, 12 FBG1, 13 %, 14 FBIS, 15 %, 16 Strategic, 17 %, 18 Extra, 19 %,
 // 20 Medical, 21 Bizzest, 22 Exam, 23 Other, 24 Attended, 25 TotalLectures, 26 %
-function parseSheet(csvText){
-  var raw = parseCSV(csvText);
+function parseSheetRows(raw){
   var out = [];
   var maxima = null;
   var lecTotal = null;
@@ -636,6 +637,7 @@ function parseSheet(csvText){
   }
   return {students: out.length ? out : null, maxima: maxima, lecTotal: lecTotal};
 }
+function parseSheet(csvText){ return parseSheetRows(parseCSV(csvText)); }
 
 var liveDot = document.getElementById('efb5LiveDot');
 var liveText = document.getElementById('efb5LiveText');
@@ -659,41 +661,91 @@ function extractAsOfDate(text){
   return m[1];
 }
 
-// Wraps fetch with a hard timeout so a stalled connection can never leave the UI stuck on
-// "Syncing..." indefinitely - after FETCH_TIMEOUT_MS the request is treated as failed.
+// The gviz/tq endpoint does not send CORS headers for plain fetch() calls from another origin -
+// every browser silently blocks the response regardless of how correct the URL/gid is. Google's
+// own docs specify script-tag injection (JSONP) as the intended cross-domain method, since
+// <script src="..."> is not subject to the same-origin policy the way fetch()/XHR are. This is
+// why every gviz request in this file goes through jsonpFetch rather than fetch().
 var FETCH_TIMEOUT_MS = 10000;
-function fetchWithTimeout(url, opts){
+var __jsonpCounter = 0;
+
+function jsonpFetch(baseUrl){
   return new Promise(function(resolve){
-    var done = false;
-    var timer = setTimeout(function(){
-      if(!done){ done = true; resolve(null); }
-    }, FETCH_TIMEOUT_MS);
+    var cbName = '__gvizCB_' + (++__jsonpCounter) + '_' + Date.now();
+    var settled = false;
+    var scriptEl = null;
+
+    function cleanup(){
+      try{ delete window[cbName]; } catch(e){ window[cbName] = undefined; }
+      if(scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+    }
+    function finish(result){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      resolve(result);
+    }
+
+    var timer = setTimeout(function(){ finish(null); }, FETCH_TIMEOUT_MS);
+
+    window[cbName] = function(response){
+      finish(response);
+    };
+
     try{
-      fetch(url, opts).then(function(res){
-        if(done) return;
-        done = true; clearTimeout(timer); resolve(res);
-      }).catch(function(){
-        if(done) return;
-        done = true; clearTimeout(timer); resolve(null);
-      });
+      var sep = baseUrl.indexOf('?') === -1 ? '?' : '&';
+      var src = baseUrl + sep + 'tqx=out:json;responseHandler:' + cbName;
+      scriptEl = document.createElement('script');
+      scriptEl.src = src;
+      scriptEl.onerror = function(){ finish(null); };
+      document.head.appendChild(scriptEl);
     } catch(e){
-      if(!done){ done = true; clearTimeout(timer); resolve(null); }
+      finish(null);
     }
   });
 }
 
+// Converts a google.visualization JSON table response into a plain array-of-arrays of string
+// values, matching the shape parseCSV() would have produced - so every existing row-based parser
+// (parseSheetRows, parseMarksRows, parseRemedialRows) works unchanged regardless of transport.
+function gvizTableToRows(response){
+  if(!response || response.status === 'error' || !response.table || !response.table.rows) return null;
+  var cols = response.table.cols || [];
+  return response.table.rows.map(function(row){
+    var cells = row.c || [];
+    var out = [];
+    var width = Math.max(cells.length, cols.length);
+    for(var i=0;i<width;i++){
+      var cell = cells[i];
+      if(!cell || cell.v===null || cell.v===undefined){ out.push(''); continue; }
+      out.push(String(cell.v));
+    }
+    return out;
+  });
+}
+
+// Fetches one gviz tab by gid and returns {rows, flatText} - flatText is a reconstructed blob
+// (all cell values joined) so existing text-based checks (signature matching, "Up to Date" date
+// extraction) keep working exactly as before, unchanged.
+function fetchGvizTab(sheetId, gid){
+  var url = "https://docs.google.com/spreadsheets/d/" + sheetId + "/gviz/tq?gid=" + gid;
+  return jsonpFetch(url).then(function(response){
+    var rows = gvizTableToRows(response);
+    if(!rows) return null;
+    var flatText = rows.map(function(r){ return r.join(','); }).join('\n');
+    return {rows: rows, flatText: flatText};
+  });
+}
+
 function fetchCandidate(gid){
-  var url = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/gviz/tq?tqx=out:csv&gid=" + gid;
-  return fetchWithTimeout(url, {cache:'no-store'})
-    .then(function(res){ if(!res || !res.ok) return null; return res.text().catch(function(){ return null; }); })
-    .then(function(text){
-      if(!text || text.indexOf('TOTAL LECTURES') === -1) return null;
-      var parsed = parseSheet(text);
-      if(!parsed.students || parsed.students.length < 20) return null;
-      parsed.asOfDate = extractAsOfDate(text);
-      return parsed;
-    })
-    .catch(function(){ return null; });
+  return fetchGvizTab(SHEET_ID, gid).then(function(result){
+    if(!result || result.flatText.indexOf('TOTAL LECTURES') === -1) return null;
+    var parsed = parseSheetRows(result.rows);
+    if(!parsed.students || parsed.students.length < 20) return null;
+    parsed.asOfDate = extractAsOfDate(result.flatText);
+    return parsed;
+  }).catch(function(){ return null; });
 }
 
 var attendanceAsOfDate = null;
@@ -701,23 +753,16 @@ var attendanceAsOfDate = null;
 // Overall watchdog: no matter what happens inside fetchLive's promise chain, force the UI out
 // of "Syncing..." after a hard ceiling so it can never appear stuck.
 function fetchLive(){
-  if(typeof fetch !== 'function'){
-    setLive('off','Offline \u00b7 showing saved data');
-    return;
-  }
   setLive('loading','Syncing\u2026');
   var settled = false;
   var watchdog = setTimeout(function(){
     if(!settled){ settled = true; setLive('off','Offline \u00b7 showing saved data'); }
   }, FETCH_TIMEOUT_MS + 5000);
-  var candidateGids = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
-  Promise.all(candidateGids.map(fetchCandidate))
-    .then(function(results){
+  // Confirmed gid for the compiled/summary tab - direct fetch, no scanning needed.
+  fetchCandidate(ATTENDANCE_COMPILED_GID)
+    .then(function(parsed){
       if(settled) return;
-      var valid = results.filter(function(r){ return r !== null; });
-      if(!valid.length) throw new Error('no valid compiled sheet found');
-      valid.sort(function(a,b){ return (b.lecTotal||0) - (a.lecTotal||0); });
-      var parsed = valid[0];
+      if(!parsed) throw new Error('compiled sheet fetch failed');
       students = rowsToStudents(parsed.students.map(function(s){
         return [s.roll,s.name,s.div,s.branddev,s.case,s.costing,s.doingbiz,s.fbg1,s.fbis,s.strategic,s.extra,s.attended,s.pct];
       }));
@@ -736,23 +781,14 @@ function fetchLive(){
 }
 
 // ---- Live marks + remedial sync ----
-function fetchTabRaw(sheetId, gid){
-  var url = "https://docs.google.com/spreadsheets/d/" + sheetId + "/gviz/tq?tqx=out:csv&gid=" + gid;
-  return fetchWithTimeout(url, {cache:'no-store'})
-    .then(function(res){ if(!res || !res.ok) return null; return res.text().catch(function(){ return null; }); })
-    .catch(function(){ return null; });
-}
-
-// Scans a range of gids in a spreadsheet and returns the raw CSV text of whichever tab contains
-// the given signature string (a subject/label unique to that semester's tab), or null if none found.
-function findTabBySignature(sheetId, signature, gidRange){
-  return Promise.all(gidRange.map(function(gid){ return fetchTabRaw(sheetId, gid); }))
-    .then(function(results){
-      for(var i=0;i<results.length;i++){
-        if(results[i] && results[i].indexOf(signature) !== -1) return results[i];
-      }
-      return null;
-    });
+// Direct fetch of a known tab by its confirmed gid. The signature string is still checked as a
+// sanity guard (in case a tab ever gets deleted/reordered) rather than used to search for it.
+function fetchTabByGid(sheetId, gid, signature){
+  return fetchGvizTab(sheetId, gid).then(function(result){
+    if(!result) return null;
+    if(signature && result.flatText.indexOf(signature) === -1) return null;
+    return result.rows;
+  });
 }
 
 function numVal(v){
@@ -763,15 +799,14 @@ function numVal(v){
   return isNaN(n) ? null : n;
 }
 
-function parseMarksTab(csvText, colMap){
-  var rows = parseCSV(csvText);
+function parseMarksRows(rows, colMap){
   var out = {};
   for(var i=0;i<rows.length;i++){
     var r = rows[i];
     var rollRaw = r[colMap.rollCol];
     var name = r[colMap.nameCol];
     var roll = parseInt(rollRaw,10);
-    if(!roll || roll<1 || !name || !name.trim()) continue;
+    if(!roll || roll<1 || !name || !String(name).trim()) continue;
     var subj = {};
     var any = false;
     Object.keys(colMap.subjects).forEach(function(code){
@@ -780,13 +815,13 @@ function parseMarksTab(csvText, colMap){
       subj[code] = {mid:mid, proj:proj, univ:univ};
       if(mid!==null || proj!==null || univ!==null) any = true;
     });
-    if(any) out[roll] = {name:name.trim(), subjects:subj};
+    if(any) out[roll] = {name:String(name).trim(), subjects:subj};
   }
   return Object.keys(out).length >= 20 ? out : null;
 }
+function parseMarksTab(csvText, colMap){ return parseMarksRows(parseCSV(csvText), colMap); }
 
-function parseRemedialTab(csvText, remMap){
-  var rows = parseCSV(csvText);
+function parseRemedialRows(rows, remMap){
   var out = {};
   for(var i=0;i<rows.length;i++){
     var r = rows[i];
@@ -800,7 +835,7 @@ function parseRemedialTab(csvText, remMap){
     });
     remMap.univOrder.forEach(function(code, j){
       var raw = r[remMap.univStart+j];
-      if(raw===undefined) return;
+      if(raw===undefined || raw===null) return;
       var vs = String(raw).trim();
       if(vs==='') return;
       if(vs.toUpperCase()==='AB' || vs.toUpperCase()==='CANCEL') return;
@@ -812,6 +847,7 @@ function parseRemedialTab(csvText, remMap){
   }
   return out;
 }
+function parseRemedialTab(csvText, remMap){ return parseRemedialRows(parseCSV(csvText), remMap); }
 
 var MID_PASS = 10, PROJ_PASS = 10, UNIV_PASS = 20;
 
@@ -847,29 +883,28 @@ function computeLiveSemResults(marksData, remedialData, subjectOrder){
 }
 
 function fetchMarksLive(){
-  if(typeof fetch !== 'function'){
+  if(typeof document === 'undefined' || typeof document.createElement !== 'function'){
     var elNoFetch = document.getElementById('efb5MarksStatus');
     window.__marksSyncStatusText = 'Marks: showing last known snapshot';
     if(elNoFetch) elNoFetch.textContent = window.__marksSyncStatusText;
     return;
   }
-  var gidRange = [0,1,2,3,4,5,6,7,8,9,10,11];
   var semPromises = [1,2,3,4].map(function(sem){
     var map = MARKS_COLUMN_MAP[sem];
-    return findTabBySignature(MARKS_SHEET_ID, map.signature, gidRange).then(function(csv){
-      if(!csv) return null;
+    return fetchTabByGid(MARKS_SHEET_ID, map.gid, map.signature).then(function(rows){
+      if(!rows) return null;
       try{
-        var parsed = parseMarksTab(csv, map);
+        var parsed = parseMarksRows(rows, map);
         return parsed ? {sem:sem, marks:parsed} : null;
       } catch(e){ return null; }
     }).catch(function(){ return null; });
   });
   var remPromises = [1,2].map(function(sem){
     var map = REMEDIAL_COLUMN_MAP[sem];
-    return findTabBySignature(REMEDIAL_SHEET_ID, map.signature, gidRange).then(function(csv){
-      if(!csv) return null;
+    return fetchTabByGid(REMEDIAL_SHEET_ID, map.gid, map.signature).then(function(rows){
+      if(!rows) return null;
       try{
-        return {sem:sem, remedial: parseRemedialTab(csv, map)};
+        return {sem:sem, remedial: parseRemedialRows(rows, map)};
       } catch(e){ return null; }
     }).catch(function(){ return null; });
   });
