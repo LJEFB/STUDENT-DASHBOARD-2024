@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>JSONP Diagnostic Test</title>
+<style>
+body{font-family:sans-serif; padding:20px; font-size:16px; line-height:1.6;}
+#log{white-space:pre-wrap; background:#f5f5f5; padding:15px; border-radius:8px; margin-top:15px; font-family:monospace; font-size:13px;}
+.ok{color:green; font-weight:bold;}
+.fail{color:red; font-weight:bold;}
+</style>
+</head>
+<body>
+<h2>Google Sheets JSONP Diagnostic</h2>
+<p>This page tests <b>only</b> the data-fetching mechanism, with nothing else on the page. Whatever appears below is the real, unfiltered result.</p>
+<div id="log">Starting test...\n</div>
+
+<script>
+var logEl = document.getElementById('log');
+function log(msg, cls){
+  var line = document.createElement('div');
+  if(cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+}
+
+var SHEET_ID = "16NNFRQ_Y5wiF2Bt-cCjZRJt-29q3mjV7Jp5teaw3cfs";
+var GID = 2002533303;
+var cbName = "myTestCallback123";
+
+log("Sheet ID: " + SHEET_ID);
+log("gid: " + GID);
+
+var url = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/gviz/tq?gid=" + GID + "&tqx=out:json;responseHandler:" + cbName;
+log("Full URL being requested:");
+log(url);
+log("---");
+
+var timedOut = false;
+var timer = setTimeout(function(){
+  timedOut = true;
+  log("TIMEOUT after 10 seconds - no response received at all.", "fail");
+  log("This usually means the script tag failed to load (blocked, 404, or network issue) - check the Network tab for the request to docs.google.com.", "fail");
+}, 10000);
+
+window[cbName] = function(response){
+  if(timedOut) return;
+  clearTimeout(timer);
+  log("SUCCESS - callback was invoked!", "ok");
+  log("Response status: " + response.status);
+  if(response.table && response.table.rows){
+    log("Number of rows received: " + response.table.rows.length, "ok");
+    log("First row sample: " + JSON.stringify(response.table.rows[0]));
+  } else {
+    log("Response had no table.rows - unexpected shape:");
+    log(JSON.stringify(response).slice(0, 500));
+  }
+};
+
+var scriptEl = document.createElement('script');
+scriptEl.src = url;
+scriptEl.onerror = function(e){
+  if(timedOut) return;
+  clearTimeout(timer);
+  log("SCRIPT LOAD ERROR - the browser could not load the script at all.", "fail");
+  log("This typically means: network blocked, DNS failure, or the browser refused the request for a security reason (check Console tab for the exact reason).", "fail");
+};
+log("Injecting <script> tag now...");
+document.head.appendChild(scriptEl);
+</script>
+</body>
+</html>
